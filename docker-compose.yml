@@ -1,0 +1,9 @@
+services:
+  oracle-arm-panel:
+    build: .
+    container_name: oracle-arm-panel
+    restart: unless-stopped
+    ports:
+      - "8088:8080"
+    volumes:
+      - ./data:/data

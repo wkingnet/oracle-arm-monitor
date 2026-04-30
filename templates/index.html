@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>甲骨文 ARM 抢实例面板</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="wrap">
+    <h1>甲骨文 ARM 抢实例面板</h1>
+    <p class="intro">每一项都加了中文说明，按提示填就行。</p>
+    <div class="toolbar">
+      <button id="saveBtn">保存配置</button>
+      <button id="startBtn" class="primary">开始监控</button>
+      <button id="stopBtn">停止监控</button>
+      <span id="statusText">状态读取中...</span>
+    </div>
+
+    <div class="grid">
+      {% for field in fields %}
+      <label class="field-card">
+        <span class="field-key">{{ field.key }}</span>
+        <span class="field-label">{{ field.label }}</span>
+        <span class="field-help">{{ field.help }}</span>
+        <textarea data-key="{{ field.key }}" placeholder="{{ field.placeholder }}">{{ field.value }}</textarea>
+      </label>
+      {% endfor %}
+    </div>
+
+    <h2>实时日志</h2>
+    <pre id="logs"></pre>
+  </div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
