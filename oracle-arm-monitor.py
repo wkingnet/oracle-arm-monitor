@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
-甲骨文云 ARM 实例配额监控 + 自动创建脚本
-跑在 NAS (192.168.5.20) 上，检测到配额立即开实例
+甲骨文云 ARM 实例配额监控 + 自动创建脚本，检测到配额立即开实例
 """
 
 import json
@@ -12,10 +11,27 @@ import time
 import requests
 import os
 import sys
+import argparse
 
 # ========== 配置区域 ==========
-# 优先从 APP_DATA_DIR/.env、/data/.env、~/oracle-arm/.env 读取，再回退到环境变量/默认值
+# 优先从 传入参数、APP_DATA_DIR/.env、./data/.env读取，再回退到环境变量/默认值
 CONFIG = {}
+
+# 参数
+parser = argparse.ArgumentParser(
+    prog=os.path.basename(__file__),  # 程序名
+    description='甲骨文云 ARM 实例配额监控 + 自动创建脚本，检测到配额立即开实例',  # 描述
+    )
+parser.add_argument("--runonce", action="store_true", help="脚本不循环只运行一次")
+parser.add_argument("--check", action="store_true", help="只检查配置项是否齐全，不申请arm")
+parser.add_argument("--env", help="指定配置文件")
+args = parser.parse_args()
+if args.runonce:
+    print(f"传入参数runonce，脚本只运行一次")
+if args.check:
+    print(f"传入参数check，脚本只检查配置项")
+if args.env:
+    print(f"传入参数env，指定配置文件{args.env}")
 
 
 def env(name, default=""):
@@ -23,16 +39,20 @@ def env(name, default=""):
 
 
 def load_env_file():
-    env_candidates = []
-    app_data_dir = os.getenv("APP_DATA_DIR", "/data")
-    if app_data_dir:
-        env_candidates.append(os.path.join(app_data_dir, ".env"))
-    env_candidates.append("/data/.env")
-    env_candidates.append(os.path.expanduser("~/oracle-arm/.env"))
+    env_path = ""
+    app_data_dir = os.getenv("APP_DATA_DIR")
+
+    if args.env:
+        env_path = args.env
+    # 如果有环境变量APP_DATA_DIR
+    elif app_data_dir:
+        env_path = os.path.join(app_data_dir, ".env")
+    # 从./data.env文件读取
+    elif os.path.exists(os.path.dirname(os.path.abspath(__file__)) + "/data/.env"):
+        env_path = os.path.dirname(os.path.abspath(__file__)) + "/data/.env"
 
     data = {}
-    env_path = next((p for p in env_candidates if p and os.path.exists(p)), None)
-    if not env_path:
+    if not os.path.exists(env_path):
         return data
     with open(env_path, "r", encoding="utf-8") as f:
         for line in f:
@@ -78,9 +98,9 @@ def shuffled_ad_iterator():
     """每次迭代随机打乱 AD 顺序，避免总在同一宿主机上撞墙"""
     import random
     ads = get_availability_domains()
-    while True:
-        random.shuffle(ads)
-        yield from ads
+    random.shuffle(ads)
+    return ads
+
 
 SHAPE = env("SHAPE", "VM.Standard.A1.Flex")
 OCPUS = int(env("OCPUS", "1"))
@@ -98,10 +118,7 @@ TELEGRAM_CHAT_ID = env("TELEGRAM_CHAT_ID")
 # 轮询间隔
 CHECK_INTERVAL = int(env("CHECK_INTERVAL", "60"))
 
-# 冲刺模式：容量满时临时切换到短间隔重试
-burst_until = 0.0
-burst_interval = 5  # 冲刺时每 5 秒试一次
-burst_duration = 30  # 冲刺窗口持续 30 秒
+
 # =============================
 
 
@@ -115,11 +132,10 @@ def validate_config():
         "IMAGE_OCID": IMAGE_OCID,
         "SSH_PUBLIC_KEY": SSH_PUBLIC_KEY,
         "AVAILABILITY_DOMAIN": AVAILABILITY_DOMAIN,
-    }
+        }
     missing = [k for k, v in required.items() if not v]
     if missing:
         print(f"[{now()}] 缺少配置: {', '.join(missing)}")
-        print(f"[{now()}] 请编辑 ~/oracle-arm/.env")
         return False
     if not os.path.exists(PRIVATE_KEY_PATH):
         print(f"[{now()}] 私钥不存在: {PRIVATE_KEY_PATH}")
@@ -145,7 +161,7 @@ def sign_request_correct(method, uri, body=""):
         f"(request-target): {method.lower()} {uri}",
         f"host: iaas.{REGION}.oraclecloud.com",
         f"date: {date_header}",
-    ]
+        ]
     header_names = ["(request-target)", "host", "date"]
 
     if method.upper() in {"POST", "PUT", "PATCH"}:
@@ -153,7 +169,7 @@ def sign_request_correct(method, uri, body=""):
             f"x-content-sha256: {body_sha256_b64}",
             "content-type: application/json",
             f"content-length: {len(body_bytes)}",
-        ])
+            ])
         header_names.extend(["x-content-sha256", "content-type", "content-length"])
 
     signing_string = "\n".join(signing_lines)
@@ -163,7 +179,7 @@ def sign_request_correct(method, uri, body=""):
 
     signature = base64.b64encode(
         private_key.sign(signing_string.encode(), padding.PKCS1v15(), hashes.SHA256())
-    ).decode()
+        ).decode()
 
     headers = {
         "host": f"iaas.{REGION}.oraclecloud.com",
@@ -175,14 +191,14 @@ def sign_request_correct(method, uri, body=""):
             f'headers="{" ".join(header_names)}",'
             f'signature="{signature}"'
         )
-    }
+        }
 
     if method.upper() in {"POST", "PUT", "PATCH"}:
         headers.update({
             "x-content-sha256": body_sha256_b64,
             "content-type": "application/json",
             "content-length": str(len(body_bytes)),
-        })
+            })
 
     return headers
 
@@ -197,7 +213,7 @@ def get_compute_client():
             "key_file": PRIVATE_KEY_PATH,
             "tenancy": TENANCY_OCID,
             "region": REGION,
-        }
+            }
         return oci.core.ComputeClient(config), oci.core.VirtualNetworkClient(config)
     except Exception:
         return None, None
@@ -208,7 +224,7 @@ def check_arm_quota_sdk(compute_client):
     try:
         shapes = compute_client.list_shapes(
             compartment_id=COMPARTMENT_OCID
-        )
+            )
         for shape in shapes.data:
             if shape.shape == SHAPE:
                 print(f"[{now()}] 发现 {SHAPE} 可用! 尝试创建实例...")
@@ -234,19 +250,19 @@ def try_create_instance_sdk(compute_client, network_client):
             shape_config=oci.core.models.LaunchInstanceShapeConfigDetails(
                 ocpus=OCPUS,
                 memory_in_gbs=MEMORY_IN_GBS
-            ),
+                ),
             source_details=oci.core.models.InstanceSourceViaImageDetails(
                 image_id=IMAGE_OCID,
                 boot_volume_size_in_gbs=DISK_SIZE
-            ),
+                ),
             create_vnic_details=oci.core.models.CreateVnicDetails(
                 subnet_id=SUBNET_OCID,
                 assign_public_ip=True
-            ),
+                ),
             metadata={
                 "ssh_authorized_keys": SSH_PUBLIC_KEY
-            }
-        )
+                }
+            )
 
         try:
             print(f"[{now()}] 尝试 AD: {availability_domain}（fault_domain=自动）")
@@ -258,7 +274,6 @@ def try_create_instance_sdk(compute_client, network_client):
         except oci.exceptions.ServiceError as e:
             if e.status == 500 or "Out of host capacity" in str(e.message):
                 print(f"[{now()}] {availability_domain} 配额已满: {e.message}")
-                trigger_burst()
                 continue
             print(f"[{now()}] {availability_domain} 创建失败: {e.message}")
         except Exception as e:
@@ -269,11 +284,11 @@ def try_create_instance_sdk(compute_client, network_client):
 def check_and_create_api():
     """纯 API 方式 (无 oci sdk)"""
     base_url = f"https://iaas.{REGION}.oraclecloud.com"
-    
+
     # 1. 检查 shape 可用性 (list shapes)
     uri = f"/20160918/shapes?compartmentId={COMPARTMENT_OCID}"
     headers = sign_request_correct("GET", uri)
-    
+
     try:
         resp = requests.get(base_url + uri, headers=headers, timeout=10)
         if resp.status_code == 200:
@@ -306,20 +321,20 @@ def try_create_instance_api(base_url):
             "shapeConfig": {
                 "ocpus": OCPUS,
                 "memoryInGBs": MEMORY_IN_GBS
-            },
+                },
             "sourceDetails": {
                 "sourceType": "image",
                 "imageId": IMAGE_OCID,
                 "bootVolumeSizeInGBs": DISK_SIZE
-            },
+                },
             "createVnicDetails": {
                 "subnetId": SUBNET_OCID,
                 "assignPublicIp": True
-            },
+                },
             "metadata": {
                 "ssh_authorized_keys": SSH_PUBLIC_KEY
-            }
-        })
+                }
+            })
 
         headers = sign_request_correct("POST", uri, payload)
 
@@ -333,20 +348,11 @@ def try_create_instance_api(base_url):
                 return True
             if resp.status_code == 500 or "OutOfHostCapacity" in resp.text or "Out of host capacity" in resp.text:
                 print(f"[{now()}] {availability_domain} 主机容量不足，继续监控...")
-                trigger_burst()
                 continue
             print(f"[{now()}] {availability_domain} 创建失败: {resp.status_code} {resp.text[:300]}")
         except Exception as e:
             print(f"[{now()}] {availability_domain} 创建异常: {e}")
     return False
-
-
-def trigger_burst():
-    """命中容量满时触发冲刺模式：30秒内每5秒快速重试"""
-    global burst_until
-    import time
-    burst_until = time.time() + burst_duration
-    print(f"[{now()}] 触发冲刺模式（{burst_duration}秒窗口）")
 
 
 def send_notification(msg):
@@ -362,7 +368,7 @@ def send_notification(msg):
                 f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
                 json={"chat_id": TELEGRAM_CHAT_ID, "text": msg},
                 timeout=5
-            )
+                )
         except:
             pass
 
@@ -372,7 +378,7 @@ def now():
 
 
 def main():
-    if "--check" in sys.argv:
+    if args.check:
         ok = validate_config()
         print("CONFIG_OK" if ok else "CONFIG_MISSING")
         sys.exit(0 if ok else 1)
@@ -386,27 +392,19 @@ def main():
         sys.exit(1)
     compute_client, network_client = get_compute_client()
     use_sdk = compute_client is not None
-    
+
     if use_sdk:
         print("使用 OCI SDK 模式")
     else:
-        print("OCI SDK 未安装，使用 REST API 模式")
-        print("安装 SDK: pip3 install oci")
-    
+        print("使用 REST API 模式（推荐OCI SDK模式，使用pip3 install oci安装SDK）")
+
     attempt = 0
     print(f"故障域: 自动分配（让 Oracle 选最优宿主机）")
     print("=" * 50)
     while True:
         attempt += 1
+        print(f"[{now()}] 第 {attempt} 次监测")
         try:
-            # 冲刺模式窗口内用短间隔
-            now_ts = time.time()
-            if now_ts < burst_until:
-                sleep_time = burst_interval
-            else:
-                sleep_time = CHECK_INTERVAL
-                burst_until = 0.0
-
             if use_sdk:
                 if check_arm_quota_sdk(compute_client):
                     if try_create_instance_sdk(compute_client, network_client):
@@ -416,17 +414,17 @@ def main():
                 if check_and_create_api():
                     print("抢到了！脚本退出。")
                     break
-
-            if attempt % 10 == 0:
-                print(f"[{now()}] 已尝试 {attempt} 次，继续监控...")
-
         except KeyboardInterrupt:
             print("\n手动退出")
             break
         except Exception as e:
             print(f"[{now()}] 循环异常: {e}")
 
-        time.sleep(sleep_time)
+        if args.runonce:
+            break
+
+        print(f"[{now()}] 延时 {CHECK_INTERVAL} 秒等待中...")
+        time.sleep(CHECK_INTERVAL)
 
 
 if __name__ == "__main__":
