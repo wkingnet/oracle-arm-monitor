@@ -24,7 +24,7 @@ parser = argparse.ArgumentParser(
     )
 parser.add_argument("--runonce", action="store_true", help="脚本不循环只运行一次")
 parser.add_argument("--check", action="store_true", help="只检查配置项是否齐全，不申请arm")
-parser.add_argument("--env", help="指定配置文件")
+parser.add_argument("--env", help="指定配置文件，需要绝对路径")
 args = parser.parse_args()
 if args.runonce:
     print(f"传入参数runonce，脚本只运行一次")
