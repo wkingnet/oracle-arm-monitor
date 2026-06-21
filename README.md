@@ -2,12 +2,13 @@
 
 （基于[dute8505/oracle-arm-monitor](https://github.com/dute8505/oracle-arm-monitor)的修改版本）
 
-甲骨文云 ARM 实例自动抢建工具，支持 Web 面板配置。
+甲骨文云 ARM 实例自动抢建工具。使用甲骨文官方SDK申请。docker模式支持 Web 面板配置。
 
 ## 功能特性
 
 - 多 AD 轮询（AD-1/2/3 随机打乱）
 - 自动分配 Fault Domain（让 Oracle 选择最优宿主机）
+- ~~冲刺模式：命中容量满后 30 秒内 5 秒速抢~~
 - Web 控制面板 + Telegram 通知
 - 支持 OCI SDK / REST API 两种模式（推荐OCI SDK模式）
 - (新增)脚本支持通过命令行参数指定配置文件，实现在同一机器上多甲骨文帐号同时申请arm。
@@ -25,6 +26,8 @@ options:
 ## 快速开始
 
 ### 方式一：直接运行（推荐）
+优点：python环境可复用，脚本调用方式灵活。  
+缺点：需熟悉如何配置python（虚拟化）环境。
 
 1. python安装所需第三方库 `pip install -r requirements.txt`
 2. 复制env模板文件 `cp .env.example .env`
@@ -33,10 +36,15 @@ options:
 
 
 ### 方式二：Docker 部署
+优点：无需配置python环境，一步到位。  
+缺点：docker新建全部python环境，占用额外硬盘空间。
 
 ```bash
 git clone https://github.com/wkingnet/oracle-arm-monitor.git
 cd oracle-arm-monitor
+
+# 创建data目录
+mkdir data
 
 # 复制配置模板
 cp .env.example data/.env
@@ -48,7 +56,7 @@ nano data/.env
 docker-compose up -d
 ```
 
-访问`http://localhost:8088`开启监控，并可查看日志和修改配置。
+访问`http://localhost:8088`开启监控，并可查看日志和修改配置。也可在data目录内查看日志。
 
 ## 配置说明
 
@@ -78,8 +86,8 @@ docker-compose up -d
 1. 每个甲骨文帐号都配置好.env文件，命名为不同的文件名。比如`user1_env`,`user2_env`。
 2. 通过命令行参数传入配置文件，即可实现脚本指定环境`python oracle-arm-monitor.py --env /path/user1_env`。
 
-## 如何利用系统的计划任务定时执行脚本
-由于oracle对短期频繁请求会警告甚至封禁帐号，所以与其脚本持续运行占用系统资源，不如使用脚本--runonce参数和计划任务定时执行，可大幅度减轻系统占用。
+## 如何利用计划任务定时执行脚本
+由于oracle对短期频繁请求会警告甚至封禁帐号，所以与其脚本持续运行占用系统资源，不如使用脚本--runonce参数配合系统计划任务功能定时执行，可大幅度减轻系统占用。并且env环境文件可随时编辑，下次脚本运行时即可生效。
 
 只需新建计划任务，执行代码`python oracle-arm-monitor.py --runonce`。
 
